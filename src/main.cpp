@@ -27,6 +27,7 @@
 #include <BLEUtils.h>
 #include <BLE2902.h>
 #include <MCP48xx.h>
+#include <Defs.h>
 
 #define LED_PIN 2
 
@@ -56,59 +57,6 @@ int voltage = 100;
 #define CHARACTERISTIC_UUID_RX "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
 #define CHARACTERISTIC_UUID_TX "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
 
-// mV table definition
-#define NOTE_C1 100
-#define NOTE_CS1 183
-#define NOTE_D1 267
-#define NOTE_DS1 350
-#define NOTE_E1 433
-#define NOTE_F1 517
-#define NOTE_FS1 600
-#define NOTE_G1 683
-#define NOTE_GS1 767
-#define NOTE_A1 850
-#define NOTE_AS1 933
-#define NOTE_B1 1017
-#define NOTE_C2 1100
-#define NOTE_CS2 1183
-#define NOTE_D2 1267
-#define NOTE_DS2 1350
-#define NOTE_E2 1433
-#define NOTE_F2 1517
-#define NOTE_FS2 1600
-#define NOTE_G2 1683
-#define NOTE_GS2 1767
-#define NOTE_A2 1850
-#define NOTE_AS2 1933
-#define NOTE_B2 2017
-#define NOTE_C3 2100
-#define NOTE_CS3 2183
-#define NOTE_D3 2267
-#define NOTE_DS3 2350
-#define NOTE_E3 2433
-#define NOTE_F3 2517
-#define NOTE_FS3 2600
-#define NOTE_G3 2683
-#define NOTE_GS3 2767
-#define NOTE_A3 2850
-#define NOTE_AS3 2933
-#define NOTE_B3 3017
-#define NOTE_C4 3100
-#define NOTE_CS4 3183
-#define NOTE_D4 3267
-#define NOTE_DS4 3350
-#define NOTE_E4 3433
-#define NOTE_F4 3517
-#define NOTE_FS4 3600
-#define NOTE_G4 3683
-#define NOTE_GS4 3767
-#define NOTE_A4 3850
-#define NOTE_AS4 3933
-#define NOTE_B4 4017
-#define NOTE_C5 4100
-
-#define MAX_STEPS 16
-
 // Variables used to calculate tempo
 // set BPM
 int bpm = 100;
@@ -117,6 +65,10 @@ int *pBpm = &bpm;
 float subdivision = 1;
 int interval;
 int *pInterval = &interval;
+unsigned long tInterval;
+int i = 0;
+// play/stop
+bool play = false;
 
 int sequence[] = {
     NOTE_C2,
@@ -132,7 +84,7 @@ int sequence[] = {
     NOTE_C3,
     NOTE_G2,
     NOTE_C2,
-    NOTE_C2,
+    NOTE_C4,
     NOTE_B2,
     NOTE_C3};
 
@@ -153,18 +105,62 @@ class MyCallbacks : public BLECharacteristicCallbacks
 {
   void onWrite(BLECharacteristic *pCharacteristic)
   {
-    std::string rxValue = pCharacteristic->getValue();
+    //std::string rxValue = pCharacteristic->getValue();
+    uint8_t *rxPrt = pCharacteristic->getData();
+    uint8_t rxValue[MSG_LENGTH];
+    for (size_t i = 0; i < MSG_LENGTH; i++)
+    {
+      rxValue[i] = *rxPrt;
+      Serial.println("---------------");
+      Serial.print("rxValue[");
+      Serial.print(i);
+      Serial.print("] = ");
+      Serial.print(rxValue[i]);
+      Serial.println("---------------");
+      rxPrt++;
+    }
+    switch (rxValue[0])
+    {
+    case OP_Tempo:
+      Serial.println("llego un OP_Tempo !!!");
+      //bpm = std::stoi()
+      Serial.println("Valor1: ");
+      Serial.print(rxValue[1]);
+      Serial.println("Valor2: ");
+      Serial.print(rxValue[2]);
+      break;
 
-    if (rxValue.length() > 0)
+    case OP_PlayStop:
+      Serial.println("llego un OP_PlayStop !!!");
+      if (rxValue[1] == Play)
+      {
+        play = true;
+      }
+      else
+      {
+        play = false;
+      }
+      break;
+
+    case '2':
+      Serial.println("llego un OP 2 !!!");
+      Serial.println("Valor1: ");
+      Serial.print(rxValue[1]);
+      Serial.println("Valor2: ");
+      Serial.print(rxValue[2]);
+      break;
+
+    default:
+      break;
+    }
+
+    /* if (rxValue.length() > 0)
     {
       Serial.println("*********");
       Serial.print("Received Value: ");
       for (int i = 0; i < rxValue.length(); i++)
       {
         Serial.print(rxValue[i]);
-        /* txValue = rxValue[i];
-        pTxCharacteristic->setValue(&txValue, 1);
-        pTxCharacteristic->notify(); */
         if (rxValue[i] == 'A' && latencyMode)
         {
           if (led_on)
@@ -209,7 +205,7 @@ class MyCallbacks : public BLECharacteristicCallbacks
 
       Serial.println();
       Serial.println("*********");
-    }
+    } */
   }
 };
 
@@ -232,7 +228,7 @@ void setup()
   Serial.begin(115200);
 
   //sequencer
-
+  tInterval = millis();
   // Create the BLE Device
   BLEDevice::init("UART Service");
 
@@ -290,27 +286,26 @@ void loop()
     oldDeviceConnected = deviceConnected;
   }
 
-  /*   // We set channel A to output 500mV
-  dac.setVoltageA(voltage);
-
-  // We send the command to the MCP4822
-  // This is needed every time we make any change
-  dac.updateDAC();
-
-  if (voltage > 2000)
-  {
-    voltage = 100;
-  }
-
-  voltage = voltage + 100;
-
-  delay(5); */
-
-  for (size_t i = 0; i < 16; i++)
+  /*  for (size_t i = 0; i < 16; i++)
   {
     interval = 60000 / (subdivision * bpm);
     dac.setVoltageA(sequence[i]);
     dac.updateDAC();
-    delay((*pInterval));
+    //delay((*pInterval));
+    delay(interval);
+  } */
+
+  interval = 60000 / (subdivision * bpm);
+  if (millis() - tInterval >= interval)
+  {
+    tInterval += interval;
+    if (play)
+    {
+      dac.setVoltageA(sequence[i]);
+      dac.updateDAC();
+      i++;
+      if (i >= 16)
+        i = 0;
+    }
   }
 }
