@@ -61,7 +61,8 @@
 // Data 1
 
 #define Play 0
-#define Stop 1
+#define Pause 1
+#define Stop 2
 
 // Data 2
 

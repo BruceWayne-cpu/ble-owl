@@ -59,14 +59,14 @@ int voltage = 100;
 
 // Variables used to calculate tempo
 // set BPM
-int bpm = 100;
+int bpm = 120;
 int *pBpm = &bpm;
 // set Subdivision 1=quarter note; 0.5 ->eight note, ....
 float subdivision = 1;
 int interval;
 int *pInterval = &interval;
 unsigned long tInterval;
-int i = 0;
+int stepIndex = 0;
 // play/stop
 bool play = false;
 
@@ -105,29 +105,17 @@ class MyCallbacks : public BLECharacteristicCallbacks
 {
   void onWrite(BLECharacteristic *pCharacteristic)
   {
-    //std::string rxValue = pCharacteristic->getValue();
     uint8_t *rxPrt = pCharacteristic->getData();
     uint8_t rxValue[MSG_LENGTH];
     for (size_t i = 0; i < MSG_LENGTH; i++)
     {
       rxValue[i] = *rxPrt;
-      Serial.println("---------------");
-      Serial.print("rxValue[");
-      Serial.print(i);
-      Serial.print("] = ");
-      Serial.print(rxValue[i]);
-      Serial.println("---------------");
       rxPrt++;
     }
     switch (rxValue[0])
     {
     case OP_Tempo:
-      Serial.println("llego un OP_Tempo !!!");
-      //bpm = std::stoi()
-      Serial.println("Valor1: ");
-      Serial.print(rxValue[1]);
-      Serial.println("Valor2: ");
-      Serial.print(rxValue[2]);
+      bpm = rxValue[1] + 1;
       break;
 
     case OP_PlayStop:
@@ -136,18 +124,19 @@ class MyCallbacks : public BLECharacteristicCallbacks
       {
         play = true;
       }
-      else
+      else if (rxValue[1] == Pause)
       {
         play = false;
       }
+      else
+      {
+        play = false;
+        stepIndex = 0;
+      }
       break;
 
-    case '2':
+    case 2:
       Serial.println("llego un OP 2 !!!");
-      Serial.println("Valor1: ");
-      Serial.print(rxValue[1]);
-      Serial.println("Valor2: ");
-      Serial.print(rxValue[2]);
       break;
 
     default:
@@ -301,11 +290,11 @@ void loop()
     tInterval += interval;
     if (play)
     {
-      dac.setVoltageA(sequence[i]);
+      dac.setVoltageA(sequence[stepIndex]);
       dac.updateDAC();
-      i++;
-      if (i >= 16)
-        i = 0;
+      stepIndex++;
+      if (stepIndex >= 16)
+        stepIndex = 0;
     }
   }
 }
