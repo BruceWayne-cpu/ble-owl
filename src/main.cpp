@@ -35,7 +35,7 @@ BLEServer *pServer = NULL;
 BLECharacteristic *pTxCharacteristic;
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
-uint8_t txValue = 0;
+uint8_t txValue[3] = {};
 bool led_on = false;
 bool latencyMode = true;
 unsigned long startTime = 0;
@@ -66,11 +66,11 @@ float subdivision = 1;
 int interval;
 int *pInterval = &interval;
 unsigned long tInterval;
-int stepIndex = 0;
+uint8_t stepIndex = 0;
 // play/stop
 bool play = false;
 
-int sequence[] = {
+/* int sequence[] = {
     NOTE_C2,
     NOTE_D2,
     NOTE_E2,
@@ -86,7 +86,43 @@ int sequence[] = {
     NOTE_C2,
     NOTE_C4,
     NOTE_B2,
-    NOTE_C3};
+    NOTE_C3}; */
+
+/* int sequence[] = {
+    100,
+    100,
+    100,
+    100,
+    1100,
+    1100,
+    1100,
+    1100,
+    2100,
+    2100,
+    2100,
+    2100,
+    3100,
+    3100,
+    3100,
+    3100}; */
+
+int sequence[] = {
+    0,
+    0,
+    1000,
+    1000,
+    2000,
+    2000,
+    3000,
+    3000,
+    4000,
+    4000,
+    5000,
+    5000,
+    6000,
+    6000,
+    7000,
+    7000};
 
 class MyServerCallbacks : public BLEServerCallbacks
 {
@@ -135,8 +171,10 @@ class MyCallbacks : public BLECharacteristicCallbacks
       }
       break;
 
-    case 2:
-      Serial.println("llego un OP 2 !!!");
+    case OP_Note:
+      sequence[rxValue[1]] = (rxValue[2] * 83);
+      //sequence[rxValue[1]] = 17 + (rxValue[2] * 83); //notes come as multiple of 83mV, 17 offset for 100mV (17+83)minimum for DAC
+      Serial.println("llego un OP Note !!!");
       break;
 
     default:
@@ -198,6 +236,24 @@ class MyCallbacks : public BLECharacteristicCallbacks
   }
 };
 
+void playNote(int voltage)
+{
+  if (voltage <= 4000)
+  {
+    //dac.shutdownChannelB();
+    dac.setVoltageB(0);
+    dac.setVoltageA(voltage);
+  }
+  else
+  {
+    //dac.turnOnChannelB();
+    voltage = voltage - 4000;
+    dac.setVoltageA(4000);
+    dac.setVoltageB(voltage);
+  }
+  dac.updateDAC();
+}
+
 void setup()
 {
   // We call the init() method to initialize the instance
@@ -206,12 +262,12 @@ void setup()
 
   // The channels are turned off at startup so we need to turn the channel we need on
   dac.turnOnChannelA();
-  //dac.turnOnChannelB();
+  dac.turnOnChannelB();
 
   // We configure the channels in High gain
   // It is also the default value so it is not really needed
   dac.setGainA(MCP4822::High);
-  //dac.setGainB(MCP4822::High);
+  dac.setGainB(MCP4822::High);
 
   pinMode(LED_PIN, OUTPUT);
   Serial.begin(115200);
@@ -263,6 +319,7 @@ void loop()
   // disconnecting
   if (!deviceConnected && oldDeviceConnected)
   {
+    // TODO usar timer envez de delay para no trancar la secuencia
     delay(500);                  // give the bluetooth stack the chance to get things ready
     pServer->startAdvertising(); // restart advertising
     Serial.println("start advertising");
@@ -271,27 +328,30 @@ void loop()
   // connecting
   if (deviceConnected && !oldDeviceConnected)
   {
+    // Init, send status of sequencer
     // do stuff here on connecting
+    delay(3000); // HACER TIMER!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    txValue[0] = OP_Tempo;
+    txValue[1] = bpm;
+    pTxCharacteristic->setValue(txValue, 2);
+    pTxCharacteristic->notify();
     oldDeviceConnected = deviceConnected;
   }
-
-  /*  for (size_t i = 0; i < 16; i++)
-  {
-    interval = 60000 / (subdivision * bpm);
-    dac.setVoltageA(sequence[i]);
-    dac.updateDAC();
-    //delay((*pInterval));
-    delay(interval);
-  } */
 
   interval = 60000 / (subdivision * bpm);
   if (millis() - tInterval >= interval)
   {
+    /* Serial.print(xPortGetCoreID()); */
     tInterval += interval;
     if (play)
     {
-      dac.setVoltageA(sequence[stepIndex]);
-      dac.updateDAC();
+      /* dac.setVoltageA(sequence[stepIndex]);
+      dac.updateDAC(); */
+      playNote(sequence[stepIndex]);
+      txValue[0] = OP_Step;
+      txValue[1] = stepIndex;
+      pTxCharacteristic->setValue(txValue, 2);
+      pTxCharacteristic->notify();
       stepIndex++;
       if (stepIndex >= 16)
         stepIndex = 0;

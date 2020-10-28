@@ -57,6 +57,8 @@
 
 #define OP_Tempo 0
 #define OP_PlayStop 1
+#define OP_Step 3
+#define OP_Note 4
 
 // Data 1
 
