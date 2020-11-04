@@ -30,6 +30,7 @@
 #include <Defs.h>
 
 #define LED_PIN 2
+#define GATE_PIN 27
 
 BLEServer *pServer = NULL;
 BLECharacteristic *pTxCharacteristic;
@@ -66,9 +67,13 @@ float subdivision = 1;
 int interval;
 int *pInterval = &interval;
 unsigned long tInterval;
+unsigned long tGate;
+int gatePercentage = 1; //percentage of interval
+int gateInterval;
 uint8_t stepIndex = 0;
 // play/stop
 bool play = false;
+bool gate = false;
 
 /* int sequence[] = {
     NOTE_C2,
@@ -238,6 +243,8 @@ class MyCallbacks : public BLECharacteristicCallbacks
 
 void playNote(int voltage)
 {
+  gate = true;
+  digitalWrite(GATE_PIN, HIGH);
   if (voltage <= 4000)
   {
     //dac.shutdownChannelB();
@@ -270,6 +277,7 @@ void setup()
   dac.setGainB(MCP4822::High);
 
   pinMode(LED_PIN, OUTPUT);
+  pinMode(GATE_PIN, OUTPUT);
   Serial.begin(115200);
 
   //sequencer
@@ -339,6 +347,13 @@ void loop()
   }
 
   interval = 60000 / (subdivision * bpm);
+  gateInterval = interval * gatePercentage;
+
+  if (play && gate && (millis() - tGate >= gateInterval))
+  {
+    tGate += gateInterval;
+    digitalWrite(GATE_PIN, LOW);
+  }
   if (millis() - tInterval >= interval)
   {
     /* Serial.print(xPortGetCoreID()); */
