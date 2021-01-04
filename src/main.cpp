@@ -26,11 +26,28 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
-#include <MCP48xx.h>
+#include <Adafruit_MCP4728.h>
+#include <Wire.h>
 #include <Defs.h>
+#include "AudioFileSourcePROGMEM.h"
+#include "AudioGeneratorWAV.h"
+#include "AudioOutputI2SNoDAC.h"
+#include "vfs_api.h"
+#include "WiFi.h"
+#include "SD.h"
 
-#define LED_PIN 2
+// VIOLA sample taken from https://ccrma.stanford.edu/~jos/pasp/Sound_Examples.html
+#include "viola.h"
+
+AudioGeneratorWAV *wav;
+AudioFileSourcePROGMEM *file;
+AudioOutputI2S *out;
+
+#define SQUARE_GATE_PIN 2     // HIGH-LOW
+#define SUB_SEQ_PIN 4         // HIGH-LOW
+#define ANALOG_DIGITAL_PIN 13 // HIGH-LOW
 #define GATE_PIN 27
+#define FREQUENCY_PIN 19
 
 BLEServer *pServer = NULL;
 BLECharacteristic *pTxCharacteristic;
@@ -43,10 +60,12 @@ unsigned long startTime = 0;
 unsigned long currentTime = 0;
 uint32_t latency = 0;
 
+Adafruit_MCP4728 mcp;
+
 // Define the MCP4822 instance, giving it the SS (Slave Select) pin
 // The constructor will also initialize the SPI library
 // We can also define a MCP4812 or MCP4802
-MCP4822 dac(4);
+//MCP4822 dac(4);
 
 // We define an int variable to store the voltage in mV so 100mV = 0.1V
 int voltage = 100;
@@ -70,46 +89,19 @@ unsigned long tInterval;
 unsigned long tGate;
 int gatePercentage = 1; //percentage of interval
 int gateInterval;
+unsigned long tFreq = 1;
+float frequency;
+float T;
+float trustFactor = 0.7;
+float prevFrequency;
 uint8_t stepIndex = 0;
 // play/stop
 bool play = false;
 bool gate = false;
 
-/* int sequence[] = {
-    NOTE_C2,
-    NOTE_D2,
-    NOTE_E2,
-    NOTE_F2,
-    NOTE_G2,
-    NOTE_A2,
-    NOTE_B2,
-    NOTE_C3,
-    NOTE_C2,
-    NOTE_G2,
-    NOTE_C3,
-    NOTE_G2,
-    NOTE_C2,
-    NOTE_C4,
-    NOTE_B2,
-    NOTE_C3}; */
-
-/* int sequence[] = {
-    100,
-    100,
-    100,
-    100,
-    1100,
-    1100,
-    1100,
-    1100,
-    2100,
-    2100,
-    2100,
-    2100,
-    3100,
-    3100,
-    3100,
-    3100}; */
+// frequency detection
+bool squarePositive = false;
+bool squareAux = false;
 
 int sequence[] = {
     0,
@@ -182,62 +174,43 @@ class MyCallbacks : public BLECharacteristicCallbacks
       Serial.println("llego un OP Note !!!");
       break;
 
+    case OP_Route:
+      Serial.println("llego un OP Route !!!");
+      switch (rxValue[1])
+      {
+      case Square:
+        Serial.println("Square");
+        digitalWrite(SQUARE_GATE_PIN, HIGH);
+        break;
+      case Gate:
+        Serial.println("Gate");
+        digitalWrite(SQUARE_GATE_PIN, LOW);
+        break;
+      case Sub:
+        Serial.println("Sub");
+        digitalWrite(SUB_SEQ_PIN, HIGH);
+        break;
+      case Seq:
+        Serial.println("Seq");
+        digitalWrite(SUB_SEQ_PIN, LOW);
+        break;
+      case A_out:
+        Serial.println("Sine");
+        digitalWrite(ANALOG_DIGITAL_PIN, HIGH);
+        break;
+      case D_out:
+        Serial.println("Digital out");
+        digitalWrite(ANALOG_DIGITAL_PIN, LOW);
+        break;
+
+      default:
+        break;
+      }
+      break;
+
     default:
       break;
     }
-
-    /* if (rxValue.length() > 0)
-    {
-      Serial.println("*********");
-      Serial.print("Received Value: ");
-      for (int i = 0; i < rxValue.length(); i++)
-      {
-        Serial.print(rxValue[i]);
-        if (rxValue[i] == 'A' && latencyMode)
-        {
-          if (led_on)
-          {
-            digitalWrite(LED_PIN, LOW);
-            led_on = false;
-            currentTime = millis();
-            latency = currentTime - startTime;
-            Serial.println("");
-            Serial.print("latency: ");
-            Serial.print(latency >> 2);
-            //pTxCharacteristic->setValue((uint8_t *)&latency, 4);
-            //pTxCharacteristic->notify();
-          }
-          else
-          {
-            digitalWrite(LED_PIN, HIGH);
-            led_on = true;
-            startTime = millis();
-            txValue = rxValue[i];
-            pTxCharacteristic->setValue(&txValue, 1);
-            pTxCharacteristic->notify();
-          }
-        }
-
-        if (rxValue[i] == 'T')
-        {
-          if (led_on)
-          {
-            (*pBpm) = 100;
-            led_on = false;
-            Serial.println("cambio bpm a 100");
-          }
-          else
-          {
-            (*pBpm) = 180;
-            led_on = true;
-            Serial.println("cambio bpm a 180");
-          }
-        }
-      }
-
-      Serial.println();
-      Serial.println("*********");
-    } */
   }
 };
 
@@ -247,37 +220,53 @@ void playNote(int voltage)
   digitalWrite(GATE_PIN, HIGH);
   if (voltage <= 4000)
   {
-    //dac.shutdownChannelB();
-    dac.setVoltageB(0);
-    dac.setVoltageA(voltage);
+    mcp.setChannelValue(MCP4728_CHANNEL_C, voltage, MCP4728_VREF_INTERNAL, MCP4728_GAIN_2X);
+    //dac.setVoltageB(0);
+    // dac.setVoltageA(voltage);
   }
   else
   {
-    //dac.turnOnChannelB();
     voltage = voltage - 4000;
-    dac.setVoltageA(4000);
-    dac.setVoltageB(voltage);
+    mcp.setChannelValue(MCP4728_CHANNEL_D, voltage, MCP4728_VREF_INTERNAL, MCP4728_GAIN_2X);
+    //dac.setVoltageA(4000);
+    //dac.setVoltageB(voltage);
   }
-  dac.updateDAC();
+  //dac.updateDAC();
 }
 
 void setup()
 {
+  file = new AudioFileSourcePROGMEM(viola, sizeof(viola));
+  wav = new AudioGeneratorWAV();
+  out = new AudioOutputI2S();
+  out->SetGain(1);
+  out->SetPinout(33, 25, 32);
+  out->SetChannels(0);
+  wav->begin(file, out);
+
   // We call the init() method to initialize the instance
 
-  dac.init();
+  //dac.init();
 
   // The channels are turned off at startup so we need to turn the channel we need on
-  dac.turnOnChannelA();
-  dac.turnOnChannelB();
+  //dac.turnOnChannelA();
+  //dac.turnOnChannelB();
 
   // We configure the channels in High gain
   // It is also the default value so it is not really needed
-  dac.setGainA(MCP4822::High);
-  dac.setGainB(MCP4822::High);
+  // dac.setGainA(MCP4822::High);
+  //dac.setGainB(MCP4822::High);
 
-  pinMode(LED_PIN, OUTPUT);
+  pinMode(34, INPUT); // Borrar cuando se arregle el layout
+  pinMode(SQUARE_GATE_PIN, OUTPUT);
+  pinMode(SUB_SEQ_PIN, OUTPUT);
+  pinMode(ANALOG_DIGITAL_PIN, OUTPUT);
   pinMode(GATE_PIN, OUTPUT);
+  digitalWrite(SQUARE_GATE_PIN, HIGH);
+  digitalWrite(SUB_SEQ_PIN, HIGH);
+  digitalWrite(ANALOG_DIGITAL_PIN, LOW);
+
+  pinMode(FREQUENCY_PIN, INPUT);
   Serial.begin(115200);
 
   //sequencer
@@ -311,11 +300,40 @@ void setup()
   // Start advertising
   pServer->getAdvertising()->start();
   Serial.println("Waiting a client connection to notify...");
+
+  // --------------- MCP4728 --------------------
+  Serial.println("Adafruit MCP4728 test!");
+
+  // Try to initialize!
+  if (!mcp.begin())
+  {
+    Serial.println("Failed to find MCP4728 chip");
+    while (1)
+    {
+      delay(10);
+    }
+  }
+  Serial.println("MCP4728 Found!");
+  mcp.setChannelValue(MCP4728_CHANNEL_A, 0, MCP4728_VREF_INTERNAL, MCP4728_GAIN_2X);
+  mcp.setChannelValue(MCP4728_CHANNEL_B, 0, MCP4728_VREF_INTERNAL, MCP4728_GAIN_2X);
+  mcp.setChannelValue(MCP4728_CHANNEL_C, 0, MCP4728_VREF_INTERNAL, MCP4728_GAIN_2X);
+  mcp.setChannelValue(MCP4728_CHANNEL_D, 0, MCP4728_VREF_INTERNAL, MCP4728_GAIN_2X);
+  mcp.saveToEEPROM();
+  // --------------- MCP4728 --------------------
 }
 
 void loop()
 {
-
+  if (wav->isRunning())
+  {
+    if (!wav->loop())
+      wav->stop();
+  }
+  else
+  {
+    Serial.printf("WAV done\n");
+    delay(1000);
+  }
   /*  if (deviceConnected)
   {
     pTxCharacteristic->setValue(&txValue, 1);
@@ -346,6 +364,23 @@ void loop()
     oldDeviceConnected = deviceConnected;
   }
 
+  squarePositive = digitalRead(FREQUENCY_PIN);
+  if (squarePositive && !squareAux)
+  {
+    T = float(micros() - tFreq) / 1000000;
+    frequency = 1 / T;
+    // FILTRO
+    frequency = prevFrequency * (1 - trustFactor) + frequency * trustFactor;
+    prevFrequency = frequency;
+    // FILTRO
+    tFreq = micros();
+    squareAux = true;
+  }
+  if (!squarePositive && squareAux)
+  {
+    squareAux = false;
+  }
+
   interval = 60000 / (subdivision * bpm);
   gateInterval = interval * gatePercentage;
 
@@ -356,6 +391,7 @@ void loop()
   }
   if (millis() - tInterval >= interval)
   {
+    //Serial.println(frequency);
     /* Serial.print(xPortGetCoreID()); */
     tInterval += interval;
     if (play)

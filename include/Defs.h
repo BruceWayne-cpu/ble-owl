@@ -59,12 +59,19 @@
 #define OP_PlayStop 1
 #define OP_Step 3
 #define OP_Note 4
+#define OP_Route 5
 
 // Data 1
 
 #define Play 0
 #define Pause 1
 #define Stop 2
+#define Square 3
+#define Gate 4
+#define Sub 5
+#define Seq 6
+#define A_out 7
+#define D_out 8
 
 // Data 2
 
